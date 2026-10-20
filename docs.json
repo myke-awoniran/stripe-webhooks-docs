@@ -17,13 +17,13 @@
   },
   "navbar": {
     "primary": {
-      "label": "Get started",
+      "label": "Start the quickstart",
       "href": "/quickstart"
     }
   },
   "tabs": [
     {
-      "tab": "Get started",
+      "tab": "Guide",
       "groups": [
         {
           "group": "Get started",
@@ -33,41 +33,12 @@
           ]
         },
         {
-          "group": "Design your docs",
+          "group": "Guides",
           "pages": [
-            "components",
-            "customization"
+            "guides/handle-events-reliably"
           ]
         }
       ]
-    },
-    {
-      "tab": "Guides",
-      "groups": [
-        {
-          "group": "Work with Thally",
-          "pages": [
-            "guides/create-a-site",
-            "guides/work-with-the-cli",
-            "guides/connect-ai-tools"
-          ]
-        }
-      ]
-    },
-    {
-      "tab": "API Reference",
-      "groups": [
-        {
-          "group": "Overview",
-          "pages": [
-            "api/introduction",
-            "api/authentication"
-          ]
-        }
-      ],
-      "api": {
-        "source": "openapi.yaml"
-      }
     },
     {
       "tab": "Changelog",

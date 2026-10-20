@@ -1,0 +1,227 @@
+---
+title: Handle events reliably
+description: Verify signatures, ignore duplicate events, respond fast, test your handler, and fix the most common Stripe webhook errors.
+---
+
+The quickstart endpoint receives events. This guide makes it safe to run in
+production. You will change the handler so that it:
+
+- Rejects requests that Stripe did not send.
+- Runs your business logic once per event, even when Stripe sends it twice.
+- Responds before Stripe stops waiting.
+
+## How Stripe delivers events
+
+Three facts shape every webhook handler:
+
+| Fact | What it means for your code |
+| --- | --- |
+| Stripe can send the same event more than once. | Your handler must detect and skip duplicates. |
+| Stripe does not guarantee the order of events. | Do not assume `payment_intent.created` arrives before `payment_intent.succeeded`. |
+| Stripe retries when your endpoint does not return a `2xx` status. | In live mode, Stripe retries for up to three days. Slow or failing endpoints cause many retries. |
+
+## Keep the raw request body
+
+Stripe calculates the signature from the exact bytes of the request body. If
+any middleware parses or changes the body before your handler, the check fails.
+
+Register the webhook route **before** any global JSON parser:
+
+```js
+// Correct: the webhook route gets the raw body.
+app.post('/webhook', express.raw({ type: 'application/json' }), webhookHandler);
+
+// Other routes parse JSON as usual.
+app.use(express.json());
+```
+
+This order is wrong, because `express.json()` runs first and replaces the raw
+body with an object:
+
+```js
+// Wrong: the signature check always fails.
+app.use(express.json());
+app.post('/webhook', webhookHandler);
+```
+
+## Verify the signature
+
+`stripe.webhooks.constructEvent()` checks three things:
+
+1. The `Stripe-Signature` header is present.
+2. The signature matches the body and your signing secret.
+3. The timestamp in the header is less than five minutes old. This blocks
+   replay attacks.
+
+If any check fails, the method throws an error. Return `400` and stop:
+
+```js
+let event;
+try {
+  event = stripe.webhooks.constructEvent(
+    req.body,
+    req.headers['stripe-signature'],
+    process.env.STRIPE_WEBHOOK_SECRET,
+  );
+} catch (err) {
+  return res.status(400).send(`Webhook Error: ${err.message}`);
+}
+```
+
+<Note type="warning" title="Never skip verification">
+  Without this check, anyone who knows your URL can send a fake
+  `payment_intent.succeeded` event and get an order for free.
+</Note>
+
+## Ignore duplicate events
+
+Each event has a unique `id`, for example `evt_1PqR...`. Record the IDs you
+have processed. Skip an event when its ID is already recorded.
+
+The example server uses an in-memory `Set`. That is enough for local testing:
+
+```js
+if (seen.has(event.id)) {
+  return res.json({ received: true, duplicate: true });
+}
+seen.add(event.id);
+```
+
+In production, store the IDs in your database. A memory set is empty after
+every restart and is not shared between server instances. Use a unique
+constraint so that two parallel requests cannot both pass the check:
+
+```sql
+CREATE TABLE processed_stripe_events (
+  event_id   TEXT PRIMARY KEY,
+  processed_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Returns one row the first time, and no rows for a duplicate.
+INSERT INTO processed_stripe_events (event_id)
+VALUES ($1)
+ON CONFLICT (event_id) DO NOTHING
+RETURNING event_id;
+```
+
+When the insert returns no rows, return `200` and do nothing else.
+
+<Tip>
+  Run the insert and your business logic in the same database transaction.
+  Then a crash cannot record the event without also applying its change.
+</Tip>
+
+## Respond fast
+
+Stripe waits a few seconds for your response. A timeout counts as a failure,
+and Stripe sends the event again later.
+
+- Return `200` as soon as the event is verified and recorded.
+- Move slow work, such as sending email or calling other APIs, to a background
+  job or queue.
+- Do not return an error for event types you do not handle. Return `200` and
+  ignore them.
+
+## Handle only the events you need
+
+Map each event type to one function. This keeps the handler short and easy to
+test:
+
+```js
+const handlers = {
+  'payment_intent.succeeded': (paymentIntent) => {
+    // Mark the order as paid.
+  },
+  'payment_intent.payment_failed': (paymentIntent) => {
+    // Tell the customer the payment failed.
+  },
+};
+
+const handler = handlers[event.type];
+if (handler) {
+  handler(event.data.object);
+}
+res.json({ received: true });
+```
+
+When you create the production endpoint in the Stripe Dashboard, select only
+these event types. Stripe then sends less traffic to your server.
+
+## Test your handler
+
+### Send events with the Stripe CLI
+
+Trigger a specific event type:
+
+```bash
+stripe trigger payment_intent.payment_failed
+```
+
+Send an existing event again. This is a quick way to test duplicate handling:
+
+```bash
+stripe events resend evt_1PqR...
+```
+
+### Write automated tests
+
+The Stripe Node.js library can create a valid signature header for a test
+payload. You do not need network access or a Stripe account to run these tests:
+
+```js app.test.js
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import Stripe from 'stripe';
+
+const stripe = new Stripe('sk_test_dummy');
+const secret = 'whsec_test_secret';
+const payload = JSON.stringify({ id: 'evt_test_1', object: 'event', type: 'payment_intent.succeeded' });
+
+test('rejects a payload signed with the wrong secret', () => {
+  const header = stripe.webhooks.generateTestHeaderString({ payload, secret: 'whsec_wrong' });
+  assert.throws(() => stripe.webhooks.constructEvent(payload, header, secret));
+});
+
+test('accepts a correctly signed payload', () => {
+  const header = stripe.webhooks.generateTestHeaderString({ payload, secret });
+  const event = stripe.webhooks.constructEvent(payload, header, secret);
+  assert.equal(event.id, 'evt_test_1');
+});
+```
+
+Run them with `node --test`. The
+[example server](https://github.com/myke-awoniran/stripe-webhooks-docs/tree/main/examples/webhook-server)
+includes four HTTP tests that cover valid events, a wrong secret, a changed
+body, and duplicates.
+
+## Go live
+
+The `whsec_` secret from `stripe listen` works only with the CLI. For a
+deployed server:
+
+1. Open the [Webhooks page](https://dashboard.stripe.com/webhooks) in the Stripe Dashboard.
+2. Add an endpoint with your public HTTPS URL, for example `https://api.example.com/webhook`.
+3. Select the event types your handler uses.
+4. Copy the endpoint's signing secret and store it as `STRIPE_WEBHOOK_SECRET` on your server.
+
+Test mode and live mode have different endpoints and different secrets. Check
+that your server uses the secret that matches the mode.
+
+## Troubleshooting
+
+| Error or symptom | Cause | Fix |
+| --- | --- | --- |
+| `Webhook payload must be provided as a string or a Buffer ... Payload was provided as a parsed JavaScript object instead.` | A JSON parser ran before your handler. | Use `express.raw({ type: 'application/json' })` on the webhook route. Register the route before `app.use(express.json())`. |
+| `No signatures found matching the expected signature for payload.` | The signing secret is wrong, or a proxy changed the body. | Copy the `whsec_` value again from `stripe listen` or the Dashboard endpoint. Restart the server so it reads the new value. |
+| `No stripe-signature header value was provided.` | The request did not come from Stripe, or a proxy removed the header. | Send test events with `stripe trigger`, not with `curl`. Check that your proxy forwards all headers. |
+| `Timestamp outside the tolerance zone` | The event is older than five minutes, or your server clock is wrong. | Sync the server clock with NTP. Do not store requests and verify them later. |
+| `stripe listen` shows `[404]` | The URL path does not match your route. | Check that `--forward-to` ends with `/webhook`. |
+| `stripe listen` shows `connection refused` | Your server is not running, or it uses a different port. | Start the server and check the port in `--forward-to`. |
+| Your code runs twice for one payment | Stripe delivered the event again. | Record event IDs and skip duplicates. See [Ignore duplicate events](#ignore-duplicate-events). |
+| The Dashboard shows many failed deliveries | Your endpoint is slow or returns errors. | Return `200` quickly and move slow work to a background job. |
+
+## Related resources
+
+- [Stripe webhooks documentation](https://docs.stripe.com/webhooks)
+- [Stripe CLI reference](https://docs.stripe.com/cli)
+- [Webhook signature verification](https://docs.stripe.com/webhooks/signature)

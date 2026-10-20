@@ -1,45 +1,65 @@
 ---
 title: Introduction
-description: Give readers a clear path from their first question to a result they can verify.
+description: A practical guide to receiving, verifying, and handling Stripe webhook events in a Node.js server.
 mode: home
 ---
 
 <Hero
-  title="Build documentation around the reader"
-  subtitle="Start with a useful first result, organize what follows, and publish every format from one reviewable source."
-  primaryLabel="Get started"
+  title="Stripe webhooks, done right the first time"
+  subtitle="Receive your first event in about ten minutes. Then make your handler safe for production."
+  primaryLabel="Start the quickstart"
   primaryHref="/quickstart"
-  secondaryLabel="Publish your docs"
-  secondaryHref="/guides/create-a-site"
+  secondaryLabel="Read the guide"
+  secondaryHref="/guides/handle-events-reliably"
 />
 
-## Build the reader journey
+## What this guide covers
 
-Begin with the task that brings most readers to your documentation, then make
-the next useful step obvious.
+Stripe sends a webhook event to your server when something happens in your
+account. A payment succeeds. A subscription renews. A customer disputes a
+charge. Your server must receive the event, prove that Stripe sent it, and act
+on it once.
+
+This guide shows you how to do that in a small Node.js and Express server. You
+test everything on your own computer with the Stripe CLI. You do not need a
+public URL or a deployed server.
+
+## Who this guide is for
+
+This guide is for backend developers who:
+
+- Use Stripe for payments, or plan to.
+- Know basic JavaScript and Node.js.
+- Want to confirm payments on the server, not only in the browser.
+
+You do not need earlier experience with webhooks.
+
+## What you will build
+
+A webhook endpoint at `POST /webhook` that:
+
+1. Accepts events only when the Stripe signature is valid.
+2. Runs your code for the event types you care about.
+3. Ignores an event that Stripe delivers a second time.
+4. Responds quickly, so Stripe does not retry without need.
+
+The complete example, with tests, is in the
+[`examples/webhook-server`](https://github.com/myke-awoniran/stripe-webhooks-docs/tree/main/examples/webhook-server)
+folder of this site's repository.
+
+## Start here
 
 <CardGroup cols="2">
-  <Card title="Write your quickstart" icon="party-horn" href="/quickstart">
-    Turn prerequisites, setup, one realistic task, and verification into a short path.
+  <Card title="Quickstart" icon="party-horn" href="/quickstart">
+    Forward a test event from Stripe to your local server and see it arrive.
   </Card>
-  <Card title="Organize your navigation" icon="grid-round" href="/customization">
-    Group related tasks and references around how people use your product.
-  </Card>
-  <Card title="Document your API" icon="code-simple" href="/api">
-    Replace `openapi.yaml` to publish browsable endpoint docs with a live playground.
-  </Card>
-  <Card title="Learn the Thally workflow" icon="wrench" href="/guides/create-a-site">
-    Create, publish, and update sites from the Cloud dashboard, the CLI, or your AI tools.
+  <Card title="Handle events reliably" icon="wrench" href="/guides/handle-events-reliably">
+    Verify signatures, ignore duplicates, respond fast, and fix common errors.
   </Card>
 </CardGroup>
 
-## Publish from one source
-
-Thally turns the same reviewed content into HTML, search, agent discovery files,
-Markdown mirrors, and a read-only MCP surface — so people and AI tools read the
-same, current answer. Add only the locales your readers need.
-
-<Note type="info" title="Start with the product, not the template">
-  Replace this page with the questions, terminology, and workflows your readers
-  already use. Keep `docs.json` focused on the path between those tasks.
+<Note type="info" title="Independent guide">
+  This is an independent community guide. It is not affiliated with or endorsed
+  by Stripe. For the full reference, see the
+  [Stripe webhooks documentation](https://docs.stripe.com/webhooks).
 </Note>

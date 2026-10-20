@@ -160,13 +160,13 @@ const brandPresets: Record<BrandPresetKey, BrandConfig> = {
 const brandPreset: BrandPresetKey = 'primary'
 
 export const siteConfig: SiteConfig = {
-  name: 'Stripe Webhooks Docs',
+  name: 'Stripe Webhooks',
   description:
-    'Documentation for Stripe Webhooks Docs.',
-  repoUrl: '',
+    'Receive, verify, and handle Stripe webhook events in Node.js. An independent guide with a tested example server.',
+  repoUrl: 'https://github.com/myke-awoniran/stripe-webhooks-docs',
   links: [
-    { label: 'Get started', href: '/quickstart' },
-    { label: 'Changelog', href: '/changelog' },
+    { label: 'Quickstart', href: '/quickstart' },
+    { label: 'GitHub', href: 'https://github.com/myke-awoniran/stripe-webhooks-docs' },
   ],
   brand: brandPresets[brandPreset],
   brandPreset,

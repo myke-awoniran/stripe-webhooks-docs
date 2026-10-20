@@ -1,47 +1,195 @@
 ---
 title: Quickstart
-description: Guide a new reader through one useful workflow and show them how to verify it.
+description: Receive and verify your first Stripe webhook event on your local computer in about ten minutes.
 ---
 
-A strong quickstart produces one meaningful result. Replace the placeholders
-below with the shortest supported path for your product.
+In this quickstart, you run a small Express server on your computer. Then you
+use the Stripe CLI to send it a real test event. At the end, your terminal shows
+a verified `payment_intent.succeeded` event.
 
 ## Before you begin
 
-List only the requirements needed for this workflow:
+You need:
 
-- An account or credential, when required
-- A supported runtime, device, browser, or operating system
-- Permission to create or change the resource used in the example
+- A [Stripe account](https://dashboard.stripe.com/register). Test mode is enough. You do not need to activate payments.
+- [Node.js](https://nodejs.org) 20.6 or later. Check with `node --version`.
+- A terminal on macOS, Linux, or Windows.
 
 <Steps>
-  <Step title="Install the required tool">
-    Give readers one recommended installation command.
+  <Step title="Install the Stripe CLI">
+    The Stripe CLI forwards events from your Stripe account to a server on your
+    computer.
+
+    <Tabs>
+      <Tab title="macOS">
+        ```bash
+        brew install stripe/stripe-cli/stripe
+        ```
+      </Tab>
+      <Tab title="Windows">
+        ```bash
+        scoop bucket add stripe https://github.com/stripe/scoop-stripe-cli.git
+        scoop install stripe
+        ```
+      </Tab>
+      <Tab title="Linux">
+        Download the latest `linux_x86_64.tar.gz` file from the
+        [Stripe CLI releases page](https://github.com/stripe/stripe-cli/releases/latest).
+        Extract it and move the `stripe` binary to a folder on your `PATH`.
+      </Tab>
+    </Tabs>
+
+    Confirm the installation:
 
     ```bash
-    npm install your-package
+    stripe --version
     ```
   </Step>
-  <Step title="Add the minimum configuration">
-    Include only the values needed for the first successful run.
+
+  <Step title="Log in to your Stripe account">
+    ```bash
+    stripe login
+    ```
+
+    The CLI opens your browser and shows a pairing code. Confirm that the code
+    matches the one in your terminal, then select **Allow access**.
+  </Step>
+
+  <Step title="Create the project">
+    Create a folder and install the two dependencies:
 
     ```bash
-    your-cli init
+    mkdir stripe-webhooks && cd stripe-webhooks
+    npm init -y
+    npm pkg set type=module
+    npm install express stripe
     ```
   </Step>
-  <Step title="Complete the first task">
-    Use a realistic example that produces an observable result.
+
+  <Step title="Write the webhook endpoint">
+    Create a file named `server.js`:
+
+    ```js server.js
+    import express from 'express';
+    import Stripe from 'stripe';
+
+    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+    const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+    const app = express();
+
+    // Stripe signs the exact bytes it sends. Keep the body raw on this route.
+    app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
+      let event;
+      try {
+        event = stripe.webhooks.constructEvent(
+          req.body,
+          req.headers['stripe-signature'],
+          webhookSecret,
+        );
+      } catch (err) {
+        console.error(`Signature check failed: ${err.message}`);
+        return res.status(400).send(`Webhook Error: ${err.message}`);
+      }
+
+      if (event.type === 'payment_intent.succeeded') {
+        const paymentIntent = event.data.object;
+        console.log(`Payment succeeded: ${paymentIntent.id} for ${paymentIntent.amount} ${paymentIntent.currency}`);
+      } else {
+        console.log(`Unhandled event type: ${event.type}`);
+      }
+
+      res.json({ received: true });
+    });
+
+    app.listen(4242, () => console.log('Listening on http://localhost:4242/webhook'));
+    ```
+
+    The `express.raw()` middleware is important. The signature check fails if
+    Express parses the body as JSON first.
+  </Step>
+
+  <Step title="Start forwarding events">
+    In a new terminal, tell the Stripe CLI to forward events to your endpoint:
 
     ```bash
-    your-cli start
+    stripe listen --forward-to localhost:4242/webhook
     ```
+
+    The CLI prints a webhook signing secret:
+
+    ```text
+    > Ready! Your webhook signing secret is whsec_1a2b3c... (^C to quit)
+    ```
+
+    Keep this terminal open.
   </Step>
-  <Step title="Verify the result">
-    State exactly what the reader should see and how to recover when it does not appear.
+
+  <Step title="Add your keys">
+    Create a file named `.env` in the project folder:
+
+    ```bash .env
+    STRIPE_SECRET_KEY=sk_test_...
+    STRIPE_WEBHOOK_SECRET=whsec_...
+    ```
+
+    - Get `STRIPE_SECRET_KEY` from **Developers > API keys** in the
+      [Stripe Dashboard](https://dashboard.stripe.com/test/apikeys). Use the
+      key that starts with `sk_test_`.
+    - Set `STRIPE_WEBHOOK_SECRET` to the `whsec_` value from the previous step.
+
+    <Note type="warning" title="Keep secrets out of Git">
+      Add `.env` to your `.gitignore` file before your first commit.
+    </Note>
+  </Step>
+
+  <Step title="Start the server">
+    In your first terminal, run:
+
+    ```bash
+    node --env-file=.env server.js
+    ```
+
+    The server prints `Listening on http://localhost:4242/webhook`.
+  </Step>
+
+  <Step title="Send a test event">
+    Open a third terminal and run:
+
+    ```bash
+    stripe trigger payment_intent.succeeded
+    ```
+
+    This command creates a real test payment in your account. Stripe then sends
+    the related events to your server.
   </Step>
 </Steps>
 
-## Choose the next task
+## Check the result
 
-Link to the guide that naturally follows this result. Avoid ending the reader’s
-journey with a generic list of every feature.
+Your server terminal shows the verified event:
+
+```text
+Unhandled event type: payment_intent.created
+Unhandled event type: charge.succeeded
+Payment succeeded: pi_3Q... for 2000 usd
+```
+
+The event order can be different. Stripe does not guarantee the order of
+delivery. The `Unhandled event type` lines are normal. One test payment
+creates several events.
+
+The `stripe listen` terminal shows a `[200]` response for each event:
+
+```text
+--> payment_intent.succeeded [evt_3Q...]
+<-- [200] POST http://localhost:4242/webhook [evt_3Q...]
+```
+
+If you see `[400]` instead, the signature check failed. See
+[Troubleshooting](/guides/handle-events-reliably#troubleshooting).
+
+## Next step
+
+Your endpoint works, but it is not ready for production yet. It can run the
+same code twice for one payment. Continue to
+[Handle events reliably](/guides/handle-events-reliably).
